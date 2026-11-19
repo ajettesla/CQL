@@ -18,6 +18,8 @@
 | [Ch 5](#chapter-5--joins-lookups--multi-event-correlation) | **Joins & Lookups** | join, selfJoin, defineTable+match, readFile — decision guide with 200k limit |
 | [Ch 6](#chapter-6--dashboards-widgets--visualization) | **Dashboards** | 11 widget types, parameters, sharing, best practices |
 | [Ch 7](#chapter-7--performance-optimization--reference) | **Performance** | Segment files, cardinality, join limits, optimization checklist, decision tables |
+| [Ch 8](#chapter-8--arrays--nested-data) | **Arrays & Nested Data** | array:*, objectArray:*, flat vs nested, reduce family, DNS hunting |
+| [Ch 9](#chapter-9--correlating-events-joins-self-joins-lookups) | **Correlating Events** | join, selfJoin, defineTable+match, readFile, process trees, sessionization |
 
 </details>
 
@@ -42,7 +44,8 @@
 | New to LogScale | [Chapter 1](#chapter-1--foundations-events-repositories-tagged-fields--data-model) → [Chapter 2](#chapter-2--query-syntax-fundamentals--statement-ordering) |
 | Writing queries | [Chapter 2](#chapter-2--query-syntax-fundamentals--statement-ordering) → [Chapter 3](#chapter-3--cql-functions-reference-classified-by-role) |
 | Threat hunting | [Chapter 4](#chapter-4--threat-hunting-patterns--mitre-attck-mapping) |
-| Correlating events | [Chapter 5](#chapter-5--joins-lookups--multi-event-correlation) |
+| Correlating events | [Chapter 5](#chapter-5--joins-lookups--multi-event-correlation) → [Chapter 9](#chapter-9--correlating-events-joins-self-joins-lookups) |
+| Arrays/JSON hunting | [Chapter 8](#chapter-8--arrays--nested-data) |
 | Building dashboards | [Chapter 6](#chapter-6--dashboards-widgets--visualization) |
 | Optimizing queries | [Chapter 7](#chapter-7--performance-optimization--reference) |
 | SPL → CQL migration | [CQL vs SPL Table](#22-cql-vs-spl-critical-syntax-differences) → [Cheat Sheet](#7114-cql-vs-spl-syntax-cheat-sheet) |
@@ -3057,6 +3060,519 @@ This is a living reference. Contributions welcome for:
 2. Identify LogScale version
 3. Show expected output
 4. Cite official LogScale documentation
+
+---
+
+# Chapter 8 — Arrays & Nested Data
+
+---
+
+<details open>
+<summary><strong>## 8.1 How CQL Writes Arrays 📦</strong></summary>
+
+LogScale has no special "array type." An array is simply a naming convention on ordinary fields, borrowed from JSON:
+
+```cql
+emails[0] = alice@corp.com
+emails[1] = bob@corp.com
+emails[2] = eve@evil.com
+```
+
+Three normal fields. The `[number]` in the name is what makes CQL treat them as one array.
+
+When a function needs the whole array, you write the name with empty brackets:
+
+```cql
+"emails[]"
+```
+
+Read `emails[]` as: "The array called emails — all of its elements."
+
+And `emails[0]` as: "Only the first element."
+
+That's the entire notation. Numbered = one element, empty = all of them.
+
+</details>
+
+---
+
+<details>
+<summary><strong>## 8.2 Flat vs Nested — The Distinction That Decides Everything ⚠️</strong></summary>
+
+This distinction is extremely important, because it decides which function family you're allowed to use.
+
+| Type | Example | Functions |
+|------|---------|-----------|
+| **FLAT array** | `ips[0] = 10.0.0.5`, `ips[1] = 10.0.0.9` | `array:*` (contains, filter, exists, length, reduce) |
+| **NESTED array** | `users[0].name = alice`, `users[0].role = admin` | `objectArray:*` (eval, exists) |
+
+**Rule**: Point a flat-array function at a nested array and it simply won't see the elements — because `users[0]` itself has no value; only `users[0].name` does. This mismatch is the #1 source of "my array query returns nothing" confusion.
+
+</details>
+
+---
+
+<details>
+<summary><strong>## 8.3 Filtering Events by Array Content 🔍</strong></summary>
+
+### 8.3.1 `array:contains()` — Exact Value Match
+```cql
+#event_simpleName=DnsRequest
+| array:contains("dns_answers[]", value="185.220.101.4")
+```
+- **Filters EVENTS** (keeps/drops whole events)
+- **Exact match only** — no wildcards, no comparisons
+- **Hard limit**: Cannot wildcard-search across an array
+
+### 8.3.2 `array:exists()` — Condition Match
+```cql
+| array:exists(array="fileSizes[]", var=x, condition=test(x > 100000000))
+```
+- **Filters EVENTS** by condition on elements
+- `var=x` — nickname for "current element" inside condition
+- Uses full `test()` expression language → [§3.2.4](#324-test-expression-evaluation-)
+
+### 8.3.3 `array:filter()` — Transform Elements (Not Events)
+```cql
+| array:filter(array="emails[]", var=e, function={e = /example\.com$/}, asArray="external[]")
+```
+- **Filters ELEMENTS** into a NEW array — all events survive
+- Original array unchanged
+- Order preserved
+
+**Decision Guide**:
+| Need | Function |
+|------|----------|
+| Exact value in array | `array:contains()` |
+| Comparison/logic/regex on elements | `array:exists()` |
+| Extract matching elements to new array | `array:filter()` |
+
+</details>
+
+---
+
+<details>
+<summary><strong>## 8.4 Array Utilities 🔧</strong></summary>
+
+### 8.4.1 `array:dedup()` — Remove Duplicates
+```cql
+| array:dedup("dns_answers[]")
+```
+DNS logs love repeating answers; threat-intel lists love duplicate IOCs. Dedup before you count, or your numbers lie.
+
+### 8.4.2 `array:append()` — Add Elements
+```cql
+| array:append(array="tags[]", values=["reviewed"])
+```
+Typical use: building up an enrichment array as your pipeline progresses — tag events as they pass through checks, then filter or group on the tags at the end.
+
+</details>
+
+---
+
+<details>
+<summary><strong>## 8.5 Calculating Over Arrays 📊</strong></summary>
+
+### 8.5.1 `array:length()` — Count Elements (Flat Arrays Only)
+```cql
+| array:length("dns_answers[]", as=answerCount)
+| answerCount > 10
+```
+⚠️ **Gotcha**: Only works on **flat arrays**. On nested arrays (`resources[0].ARN`), elements have no direct values → count comes back empty.
+
+**Workaround for nested arrays**:
+```cql
+| objectArray:eval(array="resources[]", asArray="tmp[]", function={tmp := true})
+| array:length("tmp[]", as=resourceCount)
+| array:drop("tmp[]")
+```
+
+### 8.5.2 The `reduce` Family — Aggregate Arrays
+
+| Function | Direction | Use Case |
+|----------|-----------|----------|
+| `array:reduceRow()` | Across each event's array (per row) | Average score per event |
+| `array:reduceColumn()` | Down each index (per column) | Sensor 0 vs Sensor 1 averages |
+| `array:reduceAll()` | Everything (one number) | Overall average |
+
+```cql
+// Per event (row)
+| array:reduceRow("scores[]", var=x, function=avg(x))
+
+// Per position (column)
+| array:reduceColumn("scores[]", var=x, function=avg(x))
+
+// All elements
+| array:reduceAll("scores[]", var=x, function=avg(x))
+```
+
+⚠️ **Production warning**: Parts marked experimental; verify in your tenant before wiring into production detections.
+
+</details>
+
+---
+
+<details>
+<summary><strong>## 8.6 Nested Arrays: objectArray:* Functions 🏗️</strong></summary>
+
+### 8.6.1 `objectArray:eval()` — The Bridge to Flat
+```cql
+| objectArray:eval(array="users[]", asArray="names[]", var=x, function={names := x.name})
+```
+Walks an array of objects and builds a **new flat array** from extracted fields. Once flat, the entire `array:*` toolbox applies.
+
+```cql
+// Combine sub-fields (from docs)
+| objectArray:eval("in[]", asArray="out[]", var=x, function={out := format("%s:%s", field=[x.key, x.value])})
+// in[0].key=a, in[0].value=b  →  out[0] = a:b
+```
+
+### 8.6.2 `objectArray:exists()` — Filter by Nested Content
+```cql
+| objectArray:exists(array="Vendor.resources[]", condition=test(Vendor.resources.ARN == "arn:aws:*"))
+```
+For arrays of objects, you **must** use this (not `array:exists()`). Deep nesting: `objectArray:exists()` outermost with `array:exists()` inside condition.
+
+</details>
+
+---
+
+<details>
+<summary><strong>## 8.7 Real SOC Example — Hunting in DNS Arrays 🎯</strong></summary>
+
+```cql
+#event_simpleName=DnsRequest
+| array:exists(array="dns_answers[]", var=ip, condition=test(ip == "185.220.*"))
+| array:filter(array="dns_answers[]", var=ip, function={ip = "185.220.*"}, asArray="torIPs[]")
+| array:length("dns_answers[]", as=totalAnswers)
+| groupBy(ComputerName, function=[
+    count(as=Queries),
+    collect([torIPs[0]])
+])
+```
+
+**Chapters stacking**:
+- Ch 8 → `exists`, `filter`, `length` (array work)
+- Ch 7 → `test()` inside condition (logic)
+- Ch 5 → `groupBy`, `count`, `collect` (summary)
+
+</details>
+
+---
+
+<details>
+<summary><strong>## 8.8 KQL Comparison 🔄</strong></summary>
+
+| KQL | CQL |
+|-----|-----|
+| `where DnsAnswers has_any ("185.220.101.4")` | `array:contains("dns_answers[]", value="185.220.101.4")` |
+| `where array_length(DnsAnswers) > 10` | `array:length("dns_answers[]", as=n) \| n > 10` |
+| `mv-expand answer = DnsAnswers \| where answer startswith "185.220"` | `array:exists(array="dns_answers[]", var=x, condition=test(x == "185.220.*"))` |
+
+**Philosophy**: KQL explodes arrays into rows (`mv-expand`) then uses row operators. CQL walks arrays in place with `var`-based functions. Don't look for `mv-expand` in CQL — use `array:filter()`/`objectArray:eval()` instead.
+
+</details>
+
+---
+
+<details>
+<summary><strong>## 8.9 Common Mistakes ❌</strong></summary>
+
+| Mistake | Problem | Fix |
+|---------|---------|-----|
+| `dns_answers[] = *evil*` | Wildcard doesn't search array | Use `array:exists()` + `test()` |
+| `array:contains("users[]", "alice")` on nested | Silently finds nothing | Use `objectArray:*` or `objectArray:eval()` bridge |
+| Missing `[]` or quotes | `array:length(dns_answers)` fails | Use `array:length("dns_answers[]")` |
+| `array:filter()` didn't shrink results | It reshapes arrays, doesn't drop events | Chain `array:exists()` first if you want both |
+
+</details>
+
+---
+
+# Chapter 9 — Correlating Events (Joins, Self-Joins, Lookups)
+
+---
+
+<details open>
+<summary><strong>## 9.1 The Correlation Problem 🔗</strong></summary>
+
+Everything until now compared events to conditions. **Correlation compares events to OTHER events from somewhere else.**
+
+```
+STREAM A (ProcessRollup2)          STREAM B (NetworkListenIP4)
+"powershell started, PID 4712"     "PID 4712 opened port 4444"
+                    └──────────────┘
+                    SAME PROCESS → Now it's a finding
+```
+
+Neither event is suspicious alone. PowerShell starts constantly; ports open constantly. **PowerShell that opens a listener = backdoor.**
+
+</details>
+
+---
+
+<details>
+<summary><strong>## 9.2 Method Comparison 📊</strong></summary>
+
+| Method | Max Rows | Cardinality | Execution | Best For |
+|--------|----------|-------------|-----------|----------|
+| `join()` | 200,000 (hard limit) | Low-Medium | Sequential | Small reference sets, exact matches |
+| `selfJoin()` | Memory-bound | High | Filter-first parallel | Parent-child, sessionization |
+| `defineTable()` + `match()` | No hard limit | Any | Parallel | **Production enrichment**, large lookups |
+| `readFile()` + `match()` | File size | Any | Parallel | Static CSV/JSON reference data |
+
+**LogScale recommends `defineTable()` + `match()` over `join()`** for production use.
+
+</details>
+
+---
+
+<details>
+<summary><strong>## 9.3 join() — Subquery Correlation ⚠️</strong></summary>
+
+### 9.3.1 Inner Join (Default)
+```cql
+#event_simpleName=ProcessRollup2
+| join(
+  subquery={
+    #event_simpleName=UserLogon
+    | groupBy([User], function=tail(1))
+    | select([User, ComputerName, SourceIp])
+  },
+  field=User,
+  include=[ComputerName, SourceIp]
+)
+```
+
+### 9.3.2 Left Join
+```cql
+#event_simpleName=ProcessRollup2
+| join(subquery={...}, field=User, include=[ComputerName, SourceIp], mode=left)
+```
+
+### 9.3.3 Right Join
+```cql
+#event_simpleName=UserLogon
+| join(subquery={...}, field=User, include=[ImageFileName, CommandLine], mode=right)
+```
+
+### 9.3.4 The 200k Row Hard Limit
+```cql
+// ❌ DANGEROUS: Subquery returns 500k users → SILENTLY TRUNCATES to 200k
+#event_simpleName=ProcessRollup2
+| join(subquery={ #event_simpleName=UserLogon | groupBy([User], function=tail(1)) }, field=User)
+
+// ✅ SAFE: Use defineTable + match
+defineTable(name="recent_users", query={ #event_simpleName=UserLogon | groupBy([User], function=tail(1)) | select([User, ComputerName, SourceIp]) })
+#event_simpleName=ProcessRollup2
+| match(table="recent_users", field=User, include=[ComputerName, SourceIp], strict=false)
+```
+
+- **Hard limit**: 200,000 rows from subquery — **no error, silent truncation**
+- **Sequential**: Main query waits for subquery
+- **Not for high-cardinality** — use `defineTable()` + `match()` instead
+
+</details>
+
+---
+
+<details>
+<summary><strong>## 9.4 selfJoin() / selfJoinFilter() — High-Cardinality Self-Join 🔄</strong></summary>
+
+### 9.4.1 `selfJoinFilter()` — Parent-Child Process Correlation
+```cql
+#event_simpleName=ProcessRollup2
+| selfJoinFilter(
+  field=ProcessId,
+  where=[
+    { #event_simpleName=ProcessRollup2 | ParentProcessId=* },  // Parent events
+    { #event_simpleName=ProcessRollup2 | ImageFileName="powershell.exe" }  // Child events
+  ],
+  include=[ImageFileName, CommandLine, User, ParentProcessId, ComputerName, @timestamp]
+)
+// Result: child events enriched with parent fields (prefixed with _join_)
+```
+
+### 9.4.2 When to Use `selfJoin()`
+- **High cardinality**: ProcessId, SessionId, CorrelationId
+- **Parent-child**: Process tree analysis
+- **Sessionization**: Link events by session ID
+- **No 200k limit** (within memory)
+- **Filter-first**: Each `where` element is a filter pipeline — reduces data before join
+
+</details>
+
+---
+
+<details>
+<summary><strong>## 9.5 Ad-Hoc Tables: defineTable() + match() 📋</strong></summary>
+
+### 9.5.1 `defineTable()` Syntax
+```cql
+defineTable(
+  name="asset_inventory",
+  query={
+    #repo=assets
+    #event_simpleName=AssetInventory
+    | select([ip, hostname, owner, department, criticality])
+  }
+)
+
+// Use in same or different query
+#event_simpleName=NetworkConnectIP4
+| match(table="asset_inventory", field=RemoteAddressIP4, column="ip", include=[hostname, owner, department], strict=false)
+```
+
+### 9.5.2 `match()` Syntax
+```cql
+// Basic match
+match(table="asset_inventory", field=src_ip, column="ip", include=[owner, department])
+
+// Left join (keep unmatched)
+match(table="asset_inventory", field=src_ip, column="ip", include=[owner], strict=false)
+
+// Multiple columns from CSV
+match(file="indicators.csv", column="ioc", field=FileHash, include=["threat_name", "severity", "tags"])
+```
+
+### 9.5.3 Decision Guide: `defineTable()` vs `join()`
+
+| Scenario | Use |
+|----------|-----|
+| Reference set < 200k, one-time | `join()` OK |
+| Reference set > 200k | `defineTable()` + `match()` **required** |
+| Reused across queries | `defineTable()` (define once, use many) |
+| Multi-cluster views | `defineTable()` + `match()` **only** |
+| Static CSV/JSON file | `readFile()` + `match()` or `defineTable()` |
+| Need parallel execution | `defineTable()` + `match()` |
+| Right join semantics | `join(mode=right)` |
+
+</details>
+
+---
+
+<details>
+<summary><strong>## 9.6 Lookup Files: readFile() + match() 📁</strong></summary>
+
+### 9.6.1 CSV Lookup Files
+```cql
+// Upload CSV via UI (Files) or API
+// File: indicators.csv | Columns: ioc, threat_name, severity, tags, source
+
+#event_simpleName=ProcessRollup2
+| match(file="indicators.csv", column="ioc", field=FileHash, include=["threat_name", "severity", "tags"], strict=false)
+```
+
+### 9.6.2 Enrichment Patterns
+```cql
+// IP reputation
+match(file="ip_reputation.csv", column="ip", field=src_ip, include=["reputation", "category", "last_seen"])
+
+// User risk scoring
+match(file="user_risk.csv", column="user", field=User, include=["risk_score", "watchlist"], strict=false)
+
+// Asset criticality
+match(file="assets.csv", column="hostname", field=ComputerName, include=["criticality", "environment", "owner"], strict=false)
+```
+
+**Best practice**: Keep lookup files under 1M rows. Update via scheduled automation (API).
+
+</details>
+
+---
+
+<details>
+<summary><strong>## 9.7 Correlation Patterns 🎯</strong></summary>
+
+### 9.7.1 Process Tree (Parent-Child)
+```cql
+#event_simpleName=ProcessRollup2
+| ComputerName="WKS01"
+| selfJoinFilter(
+  field=ProcessId,
+  where=[
+    { #event_simpleName=ProcessRollup2 | ParentProcessId=* },
+    { #event_simpleName=ProcessRollup2 }
+  ],
+  include=[ImageFileName, CommandLine, User, ParentProcessId, @timestamp]
+)
+| sort(@timestamp)
+| select([@timestamp, ImageFileName, CommandLine, User, ParentProcessId, _join_ImageFileName, _join_CommandLine])
+```
+
+### 9.7.2 Session Reconstruction
+```cql
+defineTable(name="user_sessions", query={
+  #event_simpleName=UserLogon
+  | select([User, ComputerName, SourceIp, SessionId, @timestamp])
+})
+
+#event_simpleName=ProcessRollup2
+| match(table="user_sessions", field=[User, ComputerName], column=[User, ComputerName], include=[SessionId, SourceIp], strict=false)
+| match(table="user_sessions", field=[User, ComputerName], column=[User, ComputerName], include=[SessionId], strict=false)
+```
+
+### 9.7.3 Lateral Movement (SMB/PSExec)
+```cql
+#event_simpleName=NetworkConnectIP4
+| RemotePort=in([445, 135, 139])
+| not(cidr(RemoteAddressIP4, subnet=["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"]))
+| defineTable(name="process_network", query={
+  #event_simpleName=ProcessRollup2
+  | select([ProcessId, ImageFileName, CommandLine, User, ComputerName])
+})
+// Requires correlation via ProcessId — use selfJoin if available
+```
+
+</details>
+
+---
+
+<details>
+<summary><strong>## 9.8 Multi-Cluster Views 🌐</strong></summary>
+
+LogScale **multi-cluster views** allow querying across clusters. `defineTable()` + `match()` works across clusters; `join()` does **not**.
+
+```cql
+defineTable(name="global_assets", query={
+  #repo=global_assets
+  | select([ip, hostname, region])
+})
+
+// In any cluster's query
+#event_simpleName=NetworkConnectIP4
+| match(table="global_assets", field=RemoteAddressIP4, column="ip", include=[hostname, region], strict=false)
+```
+
+</details>
+
+---
+
+<details>
+<summary><strong>## 9.9 KQL Comparison 🔄</strong></summary>
+
+| KQL | CQL |
+|-----|-----|
+| `join kind=inner (subquery) on ProcessId` | `join(subquery={...}, field=ProcessId)` |
+| `join kind=leftouter ...` | `join(..., mode=left)` |
+| `lookup tables` / `externaldata` | `defineTable()` + `match()` / `readFile()` + `match()` |
+| `row_window_session()` (advanced) | `selfJoinFilter()` + `partition()` |
+
+</details>
+
+---
+
+<details>
+<summary><strong>## 9.10 Common Mistakes ❌</strong></summary>
+
+| Mistake | Problem | Fix |
+|---------|---------|-----|
+| `join()` on high-cardinality field | 200k silent truncation | `defineTable()` + `match()` |
+| `selfJoin()` without `groupBy(entity)` | All entities share one timeline | Wrap in `groupBy([EntityField], function=selfJoinFilter(...))` |
+| `match()` with `strict=true` (default) | Drops unmatched events | Use `strict=false` for left-join behavior |
+| `join()` in multi-cluster view | Doesn't work | Use `defineTable()` + `match()` |
+
+</details>
 
 ---
 
