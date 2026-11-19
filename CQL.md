@@ -4,20 +4,54 @@
 
 ---
 
-## Quick Navigation
+## 📋 Quick Navigation
 
-- [Why This Reference Exists](#why-this-reference-exists)
-- [Chapter 1: Foundations — Events, Repositories, Tagged Fields & Data Model](#chapter-1--foundations-events-repositories-tagged-fields--data-model)
-- [Chapter 2: Query Syntax Fundamentals & Statement Ordering](#chapter-2--query-syntax-fundamentals--statement-ordering)
-- [Chapter 3: CQL Functions Reference (Classified by Role)](#chapter-3--cql-functions-reference-classified-by-role)
-- [Chapter 4: Threat Hunting Patterns & MITRE ATT&CK Mapping](#chapter-4--threat-hunting-patterns--mitre-attck-mapping)
-- [Chapter 5: Joins, Lookups & Multi-Event Correlation](#chapter-5--joins-lookups--multi-event-correlation)
-- [Chapter 6: Dashboards, Widgets & Visualization](#chapter-6--dashboards-widgets--visualization)
-- [Chapter 7: Performance, Optimization & Reference](#chapter-7--performance-optimization--reference)
-- [Labs (Hands-On Practice)](#labs-hands-on-practice)
-- [Evidence Standard](#evidence-standard)
+<details open>
+<summary><strong>📖 Chapters (click to expand/collapse)</strong></summary>
+
+| Chapter | Title | Key Topics |
+|---------|-------|------------|
+| [Ch 1](#chapter-1--foundations-events-repositories-tagged-fields--data-model) | **Foundations** | Events, repositories, tagged fields, parsers, CPS, field taxonomy |
+| [Ch 2](#chapter-2--query-syntax-fundamentals--statement-ordering) | **Query Syntax** | Pipeline model, CQL vs SPL, filtering, transformations, aggregation, statement ordering |
+| [Ch 3](#chapter-3--cql-functions-reference-classified-by-role) | **Functions Reference** | 60+ functions classified by role (🔍🔄📊📝🌐📈) with syntax & examples |
+| [Ch 4](#chapter-4--threat-hunting-patterns--mitre-attck-mapping) | **Threat Hunting** | MITRE ATT&CK mapped patterns: process, network, auth, persistence, evasion, exfil |
+| [Ch 5](#chapter-5--joins-lookups--multi-event-correlation) | **Joins & Lookups** | join, selfJoin, defineTable+match, readFile — decision guide with 200k limit |
+| [Ch 6](#chapter-6--dashboards-widgets--visualization) | **Dashboards** | 11 widget types, parameters, sharing, best practices |
+| [Ch 7](#chapter-7--performance-optimization--reference) | **Performance** | Segment files, cardinality, join limits, optimization checklist, decision tables |
+
+</details>
+
+<details>
+<summary><strong>🔧 Quick Reference Tables</strong></summary>
+
+- [Filter Function Decision Table](#7111-filter-function-decision-table)
+- [Aggregation Function Quick Reference](#7112-aggregation-function-quick-reference)
+- [Join Method Decision Guide](#7113-join-method-decision-guide)
+- [CQL vs SPL Syntax Cheat Sheet](#7114-cql-vs-spl-syntax-cheat-sheet)
+- [Statement Ordering Cheat Sheet](#7115-statement-ordering-cheat-sheet)
+- [Common Mistakes & Anti-Patterns](#7116-common-mistakes--anti-patterns)
+- [Glossary](#7117-glossary)
+
+</details>
+
+<details>
+<summary><strong>🎯 By Use Case</strong></summary>
+
+| Goal | Start Here |
+|------|------------|
+| New to LogScale | [Chapter 1](#chapter-1--foundations-events-repositories-tagged-fields--data-model) → [Chapter 2](#chapter-2--query-syntax-fundamentals--statement-ordering) |
+| Writing queries | [Chapter 2](#chapter-2--query-syntax-fundamentals--statement-ordering) → [Chapter 3](#chapter-3--cql-functions-reference-classified-by-role) |
+| Threat hunting | [Chapter 4](#chapter-4--threat-hunting-patterns--mitre-attck-mapping) |
+| Correlating events | [Chapter 5](#chapter-5--joins-lookups--multi-event-correlation) |
+| Building dashboards | [Chapter 6](#chapter-6--dashboards-widgets--visualization) |
+| Optimizing queries | [Chapter 7](#chapter-7--performance-optimization--reference) |
+| SPL → CQL migration | [CQL vs SPL Table](#22-cql-vs-spl-critical-syntax-differences) → [Cheat Sheet](#7114-cql-vs-spl-syntax-cheat-sheet) |
+
+</details>
 
 ---
+
+## 🎯 Why This Reference Exists
 
 ## Why This Reference Exists
 
@@ -74,7 +108,8 @@ Every substantial example in this reference follows this standard:
 
 ---
 
-## 1.1 Why This Chapter Exists
+<details open>
+<summary><strong>## 1.1 Why This Chapter Exists</strong></summary>
 
 Before writing **CQL** queries, you must understand **what you are querying**. Most beginners start with syntax:
 
@@ -87,16 +122,19 @@ Before writing **CQL** queries, you must understand **what you are querying**. M
 
 They learn syntax but don't understand where `#event_simpleName`, `ImageFileName`, `ComputerName`, `@timestamp`, `@rawstring` come from. That becomes a problem when working with:
 - Parsers (index-time field extraction)
-- Tagged fields (the performance key)
-- Repositories vs Views
-- Ingestion-time vs search-time processing
-- CrowdStrike Parsing Standard (CPS)
+- Tagged fields (the performance key) → [§1.6](#16-tagged-fields-tag-the-performance-key)
+- Repositories vs Views → [§1.4](#14-what-is-a-repository), [§1.5](#15-views-curated-subsets-of-repositories)
+- Ingestion-time vs search-time processing → [§1.10](#110-ingestion-time-vs-search-time-processing)
+- CrowdStrike Parsing Standard (CPS) → [§1.10](#crowdstrike-parsing-standard-cps-12)
 
 **This chapter gives you the vocabulary for everything that follows.**
 
+</details>
+
 ---
 
-## 1.2 What Is a LogScale Event?
+<details>
+<summary><strong>## 1.2 What Is a LogScale Event?</strong></summary>
 
 An **event** is a single record representing something that happened at a point in time.
 
@@ -118,11 +156,14 @@ An **event** is a single record representing something that happened at a point 
 └─────────────────────────────────────────────────────────────┘
 ```
 
-**Key insight**: An event is not a "row" in a database. It's a semi-structured blob (`@rawstring`) with metadata fields attached. LogScale stores events in **segment files** (compressed, columnar) optimized for time-series queries.
+**Key insight**: An event is not a "row" in a database. It's a semi-structured blob (`@rawstring`) with metadata fields attached. LogScale stores events in **segment files** (compressed, columnar) optimized for time-series queries → [§7.1](#71-how-logscale-stores-data-segment-files).
+
+</details>
 
 ---
 
-## 1.3 Where Do Events Come From?
+<details>
+<summary><strong>## 1.3 Where Do Events Come From?</strong></summary>
 
 ```
 Data Source              →  Collector/Forwarder  →  LogScale  →  Repository
@@ -135,11 +176,14 @@ Custom logs               LogScale Collector / HEC   │       custom
 Kubernetes audit          Falcon Sensor              │       kubernetes
 ```
 
-**Critical path**: Data → **Parser** (index-time) → Segment Files → Search (search-time)
+**Critical path**: Data → **Parser** (index-time) → Segment Files → Search (search-time) → [§1.11](#111-parsers-structure-at-ingest)
+
+</details>
 
 ---
 
-## 1.4 What Is a Repository?
+<details>
+<summary><strong>## 1.4 What Is a Repository?</strong></summary>
 
 A **repository** is a physical storage container for events — like a database partition with its own retention, access control, and storage.
 
@@ -156,9 +200,12 @@ Repositories control:
 
 **Best practice**: Separate repositories by data domain (windows, linux, firewall, cloud) and/or team.
 
+</details>
+
 ---
 
-## 1.5 Views: Curated Subsets of Repositories
+<details>
+<summary><strong>## 1.5 Views: Curated Subsets of Repositories</strong></summary>
 
 A **view** is a logical subset of one or more repositories with optional field filtering and field renaming.
 
@@ -181,11 +228,16 @@ Views provide:
 // In CQL, you don't specify repo/view in the query — it's a UI/API context
 ```
 
+</details>
+
 ---
 
-## 1.6 Tagged Fields (`#tag`): The Performance Key
+---
 
-**Tagged fields** are fields indexed at ingestion time. They are prefixed with `#` and are the **fastest way to filter** in LogScale.
+<details open>
+<summary><strong>## 1.6 Tagged Fields (`#tag`): The Performance Key 🔑</strong></summary>
+
+**Tagged fields** are fields indexed at ingestion time. They are prefixed with `#` and are the **fastest way to filter** in LogScale → [§7.2](#72-tagged-fields-the-index-advantage).
 
 | Tagged Field | Purpose | Example Values |
 |--------------|---------|----------------|
@@ -209,9 +261,12 @@ ImageFileName="powershell.exe"
 
 **Official reference**: [Tagged Fields](https://library.humio.com/data-management/tagged-fields.html)
 
+</details>
+
 ---
 
-## 1.7 Internal Fields (`@*` prefix)
+<details>
+<summary><strong>## 1.7 Internal Fields (`@*` prefix)</strong></summary>
 
 Fields prefixed with `@` are LogScale-internal. They exist on every event.
 
@@ -222,11 +277,14 @@ Fields prefixed with `@` are LogScale-internal. They exist on every event.
 | `@id` | Unique event UUID | Deduplication, exact event lookup |
 | `@ingesttimestamp` | When LogScale ingested the event | Ingestion latency: `eval lag=@ingesttimestamp-@timestamp` |
 
-> **`@rawstring` is the source of truth.** All search-time extractions derive from it.
+> **`@rawstring` is the source of truth.** All search-time extractions derive from it → [§3.5.4](#354-regex-with-named-groups-).
+
+</details>
 
 ---
 
-## 1.8 Default Fields (Common Across Event Types)
+<details>
+<summary><strong>## 1.8 Default Fields (Common Across Event Types)</strong></summary>
 
 These fields are commonly present depending on the parser and event source.
 
@@ -241,7 +299,7 @@ These fields are commonly present depending on the parser and event source.
 
 **Search usage:**
 ```cql
-// Tag filters (fastest)
+// Tag filters (fastest) → [§1.6](#16-tagged-fields-tag-the-performance-key)
 #repo=windows #event_simpleName=ProcessRollup2
 
 // Field filters (after tag filters)
@@ -249,37 +307,31 @@ These fields are commonly present depending on the parser and event source.
 | ComputerName="WORKSTATION01"
 ```
 
----
-
-## 1.9 Field Categories Summary Table
-
-```
-┌────────────────────────────────────────────────────────────────────┐
-│                    FIELD ORIGIN TAXONOMY                           │
-├──────────────────┬────────────────────┬───────────────────────────┤
-│ Category         │ Examples           │ When Available            │
-├──────────────────┼────────────────────┼───────────────────────────┤
-│ Internal         │ @timestamp,        │ Always                    │
-│                  │ @rawstring, @id    │                           │
-├──────────────────┼────────────────────┼───────────────────────────┤
-│ Tagged (indexed) │ #repo, #type,      │ At ingestion (parser)     │
-│                  │ #event_simpleName  │                           │
-├──────────────────┼────────────────────┼───────────────────────────┤
-│ CPS Standard     │ host, source,      │ At ingestion (CPS parser) │
-│ (indexed/search) │ ComputerName, aid  │                           │
-├──────────────────┼────────────────────┼───────────────────────────┤
-│ Parser-Extracted │ ImageFileName,     │ At ingestion (parser)     │
-│                  │ CommandLine,       │                           │
-│                  │ User, ProcessId    │                           │
-├──────────────────┼────────────────────┼───────────────────────────┤
-│ Search-Time      │ fileName :=        │ At query time (CQL)       │
-│ (calculated)     │ lower(ImageFileName)│                          │
-└──────────────────┴────────────────────┴───────────────────────────┘
-```
+</details>
 
 ---
 
-## 1.10 Ingestion-Time vs Search-Time Processing
+---
+
+<details>
+<summary><strong>## 1.9 Field Categories Summary Table</strong></summary>
+
+| Category | Examples | When Available |
+|----------|----------|----------------|
+| **Internal** | `@timestamp`, `@rawstring`, `@id` | Always |
+| **Tagged (indexed)** | `#repo`, `#type`, `#event_simpleName` | At ingestion (parser) → [§1.6](#16-tagged-fields-tag-the-performance-key) |
+| **CPS Standard** | `host`, `source`, `ComputerName`, `aid` | At ingestion (CPS parser) → [§1.10](#crowdstrike-parsing-standard-cps-12) |
+| **Parser-Extracted** | `ImageFileName`, `CommandLine`, `User`, `ProcessId` | At ingestion (parser) → [§1.11](#111-parsers-structure-at-ingest) |
+| **Search-Time (calculated)** | `fileName := lower(ImageFileName)` | At query time (CQL) → [§2.5](#25-transformation-field-assignment-format-regex-split-concat) |
+
+</details>
+
+---
+
+---
+
+<details open>
+<summary><strong>## 1.10 Ingestion-Time vs Search-Time Processing ⚙️</strong></summary>
 
 **Most important architectural distinction in LogScale.**
 
@@ -291,7 +343,7 @@ These fields are commonly present depending on the parser and event source.
 ```
 - Runs on **already-indexed** data
 - Does **not** modify stored events
-- Results exist only for this query
+- Results exist only for this query → [Ch 2-7](#quick-navigation)
 
 ### Ingestion-Time Processing (Parsers)
 ```
@@ -299,19 +351,22 @@ Raw Data → [Parser: regex, kvParse, JSON, CPS] → Structured Event → Segmen
 ```
 - Modifies **what gets stored**
 - Affects **all future queries**
-- Configured in **Parser** (YAML/JSON in UI or API)
+- Configured in **Parser** (YAML/JSON in UI or API) → [§1.11](#111-parsers-structure-at-ingest)
 
 ### CrowdStrike Parsing Standard (CPS 1.2)
 The schema standard for normalizing fields across data sources.
 - **Mandatory fields**: `@timestamp`, `#type`, `host`, `source`
 - **Standardized field names**: `ImageFileName` (not `Image` or `process_name`), `CommandLine`, `User`, `ProcessId`, `ParentProcessId`, etc.
-- **Tagged fields**: `#event_simpleName` for high-level categorization
+- **Tagged fields**: `#event_simpleName` for high-level categorization → [§1.6](#16-tagged-fields-tag-the-performance-key)
 
 **Official reference**: [CrowdStrike Parsing Standard 1.2](https://library.humio.com/data-management/crowdstrike-parsing-standard.html)
 
+</details>
+
 ---
 
-## 1.11 Parsers: Structure at Ingest
+<details>
+<summary><strong>## 1.11 Parsers: Structure at Ingest 📝</strong></summary>
 
 A **parser** transforms raw log lines into structured events at ingestion time.
 
@@ -339,35 +394,43 @@ Parser capabilities:
 
 **Official reference**: [Parsing Data](https://library.humio.com/data-management/parse-data.html)
 
+</details>
+
 ---
 
-## 1.12 Filtering, Routing, Enrichment: Three Different Problems
+<details>
+<summary><strong>## 1.12 Filtering, Routing, Enrichment: Three Different Problems 🎯</strong></summary>
 
 | Problem | Question | Search-Time (CQL) | Ingestion-Time (Parser) |
 |---------|----------|-------------------|-------------------------|
 | **Filtering** | Should this event be queried? | `#type=ProcessRollup2 \| ImageFileName="powershell.exe"` | Parser `dropEvent()` — event never stored |
 | **Routing** | Which repository/view? | N/A (query context) | Parser `repo := "windows"` or parser per repo |
-| **Enrichment** | Add context to event? | `ipLocation()`, `asn()`, `match()` lookup | Parser enrichment (GeoIP, ASN at ingest) |
+| **Enrichment** | Add context to event? | `ipLocation()`, `asn()`, `match()` lookup → [§3.6](#36-enrichment-functions-) | Parser enrichment (GeoIP, ASN at ingest) |
 
 **Why this matters**: Beginners confuse these.
 - "Drop debug logs" → Ingestion-time parser `dropEvent()` (saves license, storage)
-- "Hide passwords in dashboards" → Search-time `drop()` or field-level masking
+- "Hide passwords in dashboards" → Search-time `drop()` → [§3.7.4](#374-drop-) or field-level masking
 - "Windows logs in one repo, Linux in another" → Ingestion-time routing (parser per repo or `repo` assignment)
 
----
-
-## 1.13 Key Takeaways
-
-1. **Events = `@rawstring` + metadata fields**. `@rawstring` is immutable at search time.
-2. **Tagged fields (`#tag`) are indexed** — use them **first** for performance.
-3. **Repositories = physical storage**. Views = logical subsets. Parsers = structure at ingest.
-4. **CPS standardizes field names** — learn the canonical names (`ImageFileName`, `CommandLine`, `User`, `ProcessId`).
-5. **Ingestion-time = write path (parsers)**. Search-time = read path (CQL). Different tools.
-6. **Filtering ≠ Routing ≠ Enrichment**. Know which problem you're solving.
+</details>
 
 ---
 
-⬆️ [Back to Top](#quick-navigation)
+<details>
+<summary><strong>## 1.13 Key Takeaways ✅</strong></summary>
+
+1. **Events = `@rawstring` + metadata fields**. `@rawstring` is immutable at search time → [§1.2](#12-what-is-a-logscale-event)
+2. **Tagged fields (`#tag`) are indexed** — use them **first** for performance → [§1.6](#16-tagged-fields-tag-the-performance-key), [§7.2](#72-tagged-fields-the-index-advantage)
+3. **Repositories = physical storage**. Views = logical subsets → [§1.4](#14-what-is-a-repository), [§1.5](#15-views-curated-subsets-of-repositories). Parsers = structure at ingest → [§1.11](#111-parsers-structure-at-ingest)
+4. **CPS standardizes field names** — learn the canonical names (`ImageFileName`, `CommandLine`, `User`, `ProcessId`) → [§1.10](#crowdstrike-parsing-standard-cps-12)
+5. **Ingestion-time = write path (parsers)**. Search-time = read path (CQL). Different tools → [§1.10](#110-ingestion-time-vs-search-time-processing)
+6. **Filtering ≠ Routing ≠ Enrichment**. Know which problem you're solving → [§1.12](#112-filtering-routing-enrichment-three-different-problems)
+
+</details>
+
+---
+
+⬆️ [Back to Top](#-quick-navigation)
 
 ---
 
@@ -375,9 +438,10 @@ Parser capabilities:
 
 ---
 
-## 2.1 The Pipeline Model
+<details open>
+<summary><strong>## 2.1 The Pipeline Model 🔄</strong></summary>
 
-Every CQL query is a **pipeline** — functions connected by `|` (pipe).
+Every CQL query is a **pipeline** — functions connected by `|` (pipe) → [§2.8](#28-optimal-statement-ordering).
 
 ```
 INPUT EVENTS → [FUNCTION 1] → [FUNCTION 2] → [FUNCTION 3] → OUTPUT RESULTS
@@ -396,18 +460,21 @@ INPUT EVENTS → [FUNCTION 1] → [FUNCTION 2] → [FUNCTION 3] → OUTPUT RESUL
 ```
 
 Flow:
-1. `#event_simpleName=ProcessRollup2` → Tag filter (generates event stream from index)
+1. `#event_simpleName=ProcessRollup2` → Tag filter (generates event stream from index) → [§1.6](#16-tagged-fields-tag-the-performance-key)
 2. `| ImageFileName="powershell.exe"` → Field filter (filters stream)
-3. `| fileName := lower(ImageFileName)` → Transformation (creates new field)
-4. `| groupBy([ComputerName], function=count())` → Aggregation (transforms to summary)
-5. `| sort(_count, order=desc)` → Post-processing (reorders rows)
-6. `| head(10)` → Post-processing (limits rows)
+3. `| fileName := lower(ImageFileName)` → Transformation (creates new field) → [§2.5](#25-transformation-field-assignment-format-regex-split-concat)
+4. `| groupBy([ComputerName], function=count())` → Aggregation (transforms to summary) → [§3.4](#34-aggregation-functions-)
+5. `| sort(_count, order=desc)` → Post-processing (reorders rows) → [§3.7.5](#375-sort-)
+6. `| head(10)` → Post-processing (limits rows) → [§3.7.6](#376-head--tail-)
+
+</details>
 
 ---
 
-## 2.2 CQL vs SPL: Critical Syntax Differences
+<details>
+<summary><strong>## 2.2 CQL vs SPL: Critical Syntax Differences ⚠️</strong></summary>
 
-**LogScale CQL is NOT Splunk SPL. Never mix syntax between these languages.**
+**LogScale CQL is NOT Splunk SPL. Never mix syntax between these languages.** → [Cheat Sheet](#7114-cql-vs-spl-syntax-cheat-sheet)
 
 | Operation | LogScale CQL | NOT Splunk SPL |
 |-----------|--------------|----------------|
@@ -417,7 +484,7 @@ Flow:
 | **Aggregation** | `groupBy(field, function=count())` | `stats count by field` |
 | **Time bucketing** | `bucket(span=1h, function=count())` | `bin span=1h \| stats count` |
 | **Time series chart** | `timeChart(span=1h, function=count())` | `timechart span=1h count` |
-| **Tagged field filter** | `#event_simpleName=ProcessRollup2` | No direct equivalent |
+| **Tagged field filter** | `#event_simpleName=ProcessRollup2` | No direct equivalent → [§1.6](#16-tagged-fields-tag-the-performance-key) |
 | **Field filter** | `ImageFileName="powershell.exe"` | `ImageFileName="powershell.exe"` |
 | **Set membership** | `in(field, values=[a,b,c])` | `field IN (a,b,c)` |
 | **Regex match (filter)** | `field=/pattern/i` or `match(field, "pattern")` | `regex field="pattern"` |
@@ -431,8 +498,12 @@ Flow:
 | **Negation (field not value OR missing)** | `not(field="value")` | `NOT field="value"` |
 
 ### CQL Does Not Have
-- `search` command (use tag/field filters directly)
-- `where` command (use `test()` or filter syntax)
+- `search` command (use tag/field filters directly) → [§2.3](#23-generating-events-createevents-and-repository-selection)
+- `where` command (use `test()` or filter syntax) → [§3.2.4](#324-test-expression-evaluation-)
+
+</details>
+
+---
 - `eval` command (use `:=` assignment)
 - `stats` command (use `groupBy()` or `stats()`)
 - `table` command (use `table()` or `select()`)
@@ -468,11 +539,10 @@ createEvents([
 
 **Use case**: Testing queries, building lookup tables, creating sample data for dashboards.
 
----
+<details>
+<summary><strong>## 2.4 Filtering: Tag Filters, Field Filters, `in()`, `test()`, `cidr()` 🔍</strong></summary>
 
-## 2.4 Filtering: Tag Filters, Field Filters, `in()`, `test()`, `cidr()`
-
-### Tag Filters (Fastest — Always First)
+### Tag Filters (Fastest — Always First) → [§1.6](#16-tagged-fields-tag-the-performance-key)
 ```cql
 // Single tag
 #event_simpleName=ProcessRollup2
@@ -497,7 +567,7 @@ ImageFileName="powershell.exe"
 | ComputerName="WKS01"
 ```
 
-### `in()` — Set Membership
+### `in()` — Set Membership → [§3.2.3](#323-in-set-membership-)
 ```cql
 // Single field, multiple values (OR logic)
 ImageFileName=in(["powershell.exe", "pwsh.exe", "powershell_ise.exe"])
@@ -509,7 +579,7 @@ in(field=[ImageFileName, CommandLine], values=["powershell*", "cmd.exe"])
 in(field=ImageFileName, values=["powershell.exe"], ignoreCase=true)
 ```
 
-### `test()` — Expression Evaluation
+### `test()` — Expression Evaluation → [§3.2.4](#324-test-expression-evaluation-)
 ```cql
 // Field-to-field comparison
 test(bytes_out > bytes_in)
@@ -527,9 +597,13 @@ test(match(CommandLine, "(?i)encodedcommand"))
 // LIKE pattern (SQL-style)
 test(ImageFileName LIKE "power%")
 test(host LIKE "DC0_")  // _ = single char
+
+// Field existence
+test(field=User)        // field exists
+test(not(field=User))   // field missing
 ```
 
-### `cidr()` — IP Range Matching
+### `cidr()` — IP Range Matching → [§3.2.5](#325-cidr-ip-range-matching-)
 ```cql
 // Filter private IPs
 cidr(src_ip, subnet=["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"])
@@ -538,11 +612,14 @@ cidr(src_ip, subnet=["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"])
 not(cidr(src_ip, subnet=["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "127.0.0.0/8", "169.254.0.0/16"]))
 ```
 
+</details>
+
 ---
 
-## 2.5 Transformation: Field Assignment (`:=`), `format()`, `regex()`, `split()`, `concat()`
+<details>
+<summary><strong>## 2.5 Transformation: Field Assignment (`:=`), `format()`, `regex()`, `split()`, `concat()` 🔄</strong></summary>
 
-### `:=` — Field Assignment (Core Transformation)
+### `:=` — Field Assignment (Core Transformation) → [§3.3.1](#331--field-assignment-)
 ```cql
 // Simple assignment
 fileName := lower(ImageFileName)
@@ -610,17 +687,22 @@ clean_cmd := replace(field=CommandLine, with="", regex="(?i)-enc\\s+\\w+")
 masked := replace(field=CommandLine, with="***REDACTED***", regex="(?i)password=\\S+")
 ```
 
-### `lower()` / `upper()` — Case Conversion
+### `lower()` / `upper()` — Case Conversion → [§3.3.5](#335-lower--upper-case-conversion-)
 ```cql
 file_lower := lower(ImageFileName)
 domain_upper := upper(DomainName)
 ```
 
+</details>
+
 ---
 
-## 2.6 Aggregation: `groupBy()`, `count()`, `sum()`, `avg()`, `stats()`, `collect()`, `top()`, `bucket()`, `timeChart()`
+---
 
-### `groupBy()` — Core Aggregation
+<details>
+<summary><strong>## 2.6 Aggregation: `groupBy()`, `count()`, `sum()`, `avg()`, `stats()`, `collect()`, `top()`, `bucket()`, `timeChart()` 📊</strong></summary>
+
+### `groupBy()` — Core Aggregation → [§3.4.1](#341-groupby-core-aggregation-)
 ```cql
 // Single field, count
 #event_simpleName=ProcessRollup2
@@ -629,7 +711,7 @@ domain_upper := upper(DomainName)
 // Multiple fields
 | groupBy([ComputerName, ImageFileName], function=count())
 
-// With limit (CRITICAL for performance)
+// With limit (CRITICAL for performance) → [§7.4.1](#741-always-use-limit-in-groupby)
 | groupBy([ComputerName], function=count(), limit=10000)
 
 // Multiple aggregations
@@ -697,7 +779,7 @@ groupBy([User], function=count())
 )
 ```
 
-### `timeChart()` — Time Series Visualization
+### `timeChart()` — Time Series Visualization → [§3.4.7](#347-timechart-time-series-visualization-)
 ```cql
 // Time chart (optimized for dashboards)
 #event_simpleName=ProcessRollup2
@@ -710,9 +792,72 @@ groupBy([User], function=count())
 | timeChart(span=1h, function=[count(), sum(bytes)], series=action)
 ```
 
+</details>
+
 ---
 
-## 2.7 Post-Processing: `sort()`, `head()`, `tail()`, `table()`, `select()`, `rename()`, `drop()`
+<details>
+<summary><strong>## 2.7 Post-Processing: `sort()`, `head()`, `tail()`, `table()`, `select()`, `rename()`, `drop()` 📈</strong></summary>
+
+### `sort()` — Sort Results → [§3.7.5](#375-sort-)
+```cql
+// Descending (default for numbers)
+sort(_count, order=desc)
+
+// Ascending
+sort(@timestamp, order=asc)
+
+// Multiple fields
+sort([ComputerName, _count], order=[asc, desc])
+```
+
+### `head()` / `tail()` — Limit Results → [§3.7.6](#376-head--tail-)
+```cql
+// First N rows
+head(10)
+
+// Last N rows
+tail(10)
+```
+
+### `table()` — Tabular Output (Aggregation) → [§3.7.1](#371-table-)
+```cql
+// Table with specific fields (limits to 200 rows by default)
+table([ComputerName, ImageFileName, _count], limit=1000)
+
+// table() is an AGGREGATION — reduces rows
+```
+
+### `select()` — Pluck Fields (No Aggregation) → [§3.7.2](#372-select-)
+```cql
+// Select fields without reducing rows (keeps all events)
+select([@timestamp, ComputerName, ImageFileName, CommandLine])
+
+// Use select() when you want to keep event granularity
+// Use table() when you want aggregated summary
+```
+
+### `rename()` — Rename Fields → [§3.7.3](#373-rename-)
+```cql
+// Single rename
+rename(field=ImageFileName, as=ProcessName)
+
+// Multiple renames
+rename(field=[ImageFileName, ComputerName], as=[ProcessName, Host])
+```
+
+### `drop()` — Remove Fields → [§3.7.4](#374-drop-)
+```cql
+// Drop single field
+drop(@rawstring)
+
+// Drop multiple fields
+drop([@id, @ingesttimestamp, _count])
+```
+
+</details>
+
+---
 
 ### `sort()` — Sort Results
 ```cql
@@ -807,7 +952,7 @@ drop([@id, @ingesttimestamp, _count])
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
-### Why Order Matters
+### Why Order Matters → [§7.5](#75-statement-ordering-performance)
 
 | Wrong Order | Problem | Correct Order |
 |-------------|---------|---------------|
@@ -816,9 +961,12 @@ drop([@id, @ingesttimestamp, _count])
 | `field=*` → `#tag` | Full scan, then tag filter | `#tag` → `field=*` |
 | `timeChart` → `filter` | Charts all time, then filters | Filter → `timeChart` |
 
+</details>
+
 ---
 
-## 2.9 Common Syntax Patterns
+<details>
+<summary><strong>## 2.9 Common Syntax Patterns 📋</strong></summary>
 
 ### Pattern: Process Execution with Enrichment
 ```cql
@@ -853,19 +1001,21 @@ drop([@id, @ingesttimestamp, _count])
 | sort(total_failures, order=desc)
 ```
 
+</details>
+
 ---
 
 ## 2.10 What's Next
 
-- **Chapter 3**: Complete function reference classified by role
-- **Chapter 4**: Threat hunting patterns mapped to MITRE ATT&CK
-- **Chapter 5**: Joins, lookups, and multi-event correlation
-- **Chapter 6**: Dashboards and visualization
-- **Chapter 7**: Performance optimization and reference tables
+- **Chapter 3**: Complete function reference classified by role → [Chapter 3](#chapter-3--cql-functions-reference-classified-by-role)
+- **Chapter 4**: Threat hunting patterns mapped to MITRE ATT&CK → [Chapter 4](#chapter-4--threat-hunting-patterns--mitre-attck-mapping)
+- **Chapter 5**: Joins, lookups, and multi-event correlation → [Chapter 5](#chapter-5--joins-lookups--multi-event-correlation)
+- **Chapter 6**: Dashboards and visualization → [Chapter 6](#chapter-6--dashboards-widgets--visualization)
+- **Chapter 7**: Performance optimization and reference tables → [Chapter 7](#chapter-7--performance-optimization--reference)
 
 ---
 
-⬆️ [Back to Top](#quick-navigation)
+⬆️ [Back to Top](#-quick-navigation)
 
 ---
 
